@@ -1,13 +1,20 @@
 import { db } from "@/lib/db";
 
+export const dynamic = 'force-dynamic';
+
 // merchantId stubbed for scaffold clarity — wire to auth session.
 const merchantId = "demo-merchant";
 
 export default async function DashboardPage() {
-  const store = await db.store.findUnique({
-    where: { merchantId },
-    include: { products: true, media: true },
-  });
+  let store;
+  try {
+    store = await db.store.findUnique({
+      where: { merchantId },
+      include: { products: true, media: true },
+    });
+  } catch {
+    store = null;
+  }
 
   return (
     <main className="min-h-screen px-6 py-10 max-w-5xl mx-auto">

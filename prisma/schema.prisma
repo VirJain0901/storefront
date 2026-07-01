@@ -1,0 +1,182 @@
+// Storefront — data model
+// Covers onboarding context, store/product data, and agent-generated assets.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Merchant & onboarding context ----------
+
+model Merchant {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  context   MerchantContext?
+  store     Store?
+  campaigns Campaign[]
+  pricingExperiments PricingExperiment[]
+}
+
+// One row per merchant, populated incrementally by the intake agent.
+// Fields are nullable because the agent fills them conversationally,
+// not via a fixed form — a session can be resumed mid-intake.
+model MerchantContext {
+  id         String   @id @default(cuid())
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  merchantId String   @unique
+
+  // 1. What they sell
+  productCategory   String?
+  productType       String?  // physical | digital | service
+  catalogSizeBand   String?  // e.g. "1-10", "11-50", "50+"
+  priceRangeLow     Int?
+  priceRangeHigh    Int?
+
+  // 2. Where they want to sell
+  sellChannels      String[] // storefront, instagram, whatsapp, amazon, flipkart, meesho, offline
+
+  // 3. Delivery model
+  deliveryModel     String?  // self_fulfilled | third_party_logistics | pickup_only | dropship
+  logisticsPartner  String?
+
+  // 4. Existing integrations
+  paymentGateway    String?
+  inventoryTool     String?
+  crmTool           String?
+  existingDomain    String?
+
+  // 5. Add-ons wanted
+  addons            String[] // marketing_automation, pricing_ai, reviews, loyalty, analytics
+
+  // Gap-filling questions (see build spec)
+  hasBrandAssets    Boolean?
+  brandColors       String[]
+  targetGeography   String?  // tier1 | tier2_3 | pan_india | export
+  teamSize          String?  // solo | small_team
+  adSpendAppetite   String?  // low | medium | high
+  launchUrgency     String?  // today | this_week | planning_ahead
+  gstRegistered     Boolean?
+  businessType      String?  // proprietorship | llp | pvt_ltd | unregistered
+  returnPolicyStance String?
+
+  intakeComplete    Boolean  @default(false)
+  rawTranscript     Json?    // full intake chat transcript for audit/re-generation
+
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Store, products, media ----------
+
+model Store {
+  id         String   @id @default(cuid())
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  merchantId String   @unique
+
+  name       String?
+  slug       String?  @unique
+  theme      String   @default("minimal")
+  status     String   @default("draft") // draft | live
+  heroCopy   String?
+  domain     String?
+
+  products   Product[]
+  media      MediaAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  store       Store    @relation(fields: [storeId], references: [id])
+  storeId     String
+
+  title       String
+  description String?
+  price       Int
+  stock       Int      @default(0)
+  status      String   @default("draft") // draft | active | out_of_stock
+
+  media       MediaAsset[]
+  inventoryEvents InventoryEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MediaAsset {
+  id        String   @id @default(cuid())
+  store     Store    @relation(fields: [storeId], references: [id])
+  storeId   String
+  product   Product? @relation(fields: [productId], references: [id])
+  productId String?
+
+  url         String
+  altText     String?
+  backgroundStyle String? // solid | gradient | scene
+  source      String   @default("upload") // upload | ai_generated
+
+  createdAt DateTime @default(now())
+}
+
+model InventoryEvent {
+  id        String   @id @default(cuid())
+  product   Product  @relation(fields: [productId], references: [id])
+  productId String
+  delta     Int
+  reason    String   // restock | sale | correction
+  createdAt DateTime @default(now())
+}
+
+// ---------- Agent-generated marketing & optimization ----------
+
+model Campaign {
+  id         String   @id @default(cuid())
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  merchantId String
+
+  channel    String   // instagram, whatsapp, google, meta
+  status     String   @default("draft") // draft | active | paused
+  variants   CampaignVariant[]
+
+  createdAt DateTime @default(now())
+}
+
+model CampaignVariant {
+  id         String   @id @default(cuid())
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  campaignId String
+
+  headline   String
+  body       String
+  imageUrl   String?
+  isWinner   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+// Pricing / conversion optimizer — v1 is rules-based (see agents/optimize),
+// this table is where a future learning loop would read/write.
+model PricingExperiment {
+  id         String   @id @default(cuid())
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  merchantId String
+
+  productId  String
+  variantA   Int
+  variantB   Int
+  metric     String   @default("conversion_rate")
+  status     String   @default("running") // running | concluded
+  winner     String?  // "A" | "B" | null
+
+  startedAt  DateTime @default(now())
+  endedAt    DateTime?
+}
